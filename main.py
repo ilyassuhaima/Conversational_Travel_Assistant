@@ -1,32 +1,7 @@
 """
 Kavak Conversational Travel Assistant
 ======================================
-Architecture: LangGraph stateful agent with three specialized tools:
-  1. FlightSearchTool   – filters mock JSON flight listings
-  2. RAGTool            – answers visa/policy questions via FAISS vector search
-  3. General fallback   – handled by the LLM directly
-
-LLM Backend : Groq (llama-3.3-70b-versatile) — free tier, no billing required
-Embeddings  : HuggingFace all-MiniLM-L6-v2 — fully local, no API key needed
-Vector Store: FAISS (in-memory, persisted to disk)
-
-Chunking Strategy:
-  - Chunk size  : 512 chars  → captures complete policy statements without splitting rules
-  - Chunk overlap: 50 chars  → ~10% overlap prevents boundary blindness at chunk edges
-  - Splitter    : RecursiveCharacterTextSplitter (respects paragraph/sentence boundaries)
-
-Why these values?
-  - 512 is large enough to hold a full visa rule (multi-condition sentences) but small
-    enough to keep retrieved context focused. At 1024 we'd retrieve irrelevant context
-    alongside the answer; at 128 we'd split rules mid-sentence.
-  - 50-char overlap ensures that a query matching content straddling two chunk boundaries
-    still retrieves the correct context. 10% is the standard heuristic for policy docs.
-
-Why HuggingFace all-MiniLM-L6-v2 for embeddings?
-  - Runs fully locally — zero API calls, zero cost, no key needed
-  - 384-dimensional vectors; fast and accurate for small knowledge bases (<1000 chunks)
-  - Top performer on MTEB benchmarks among lightweight models
-  - Downloads once (~90MB) and caches locally via HuggingFace hub
+A LangGraph-based agent with flight search and RAG tools for travel queries.
 """
 
 import json
@@ -35,9 +10,9 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -49,9 +24,6 @@ from typing_extensions import TypedDict
 
 load_dotenv()
 
-# ──────────────────────────────────────────────
-# Paths
-# ──────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
 FAISS_INDEX_PATH = BASE_DIR / "faiss_index"
@@ -59,74 +31,32 @@ FAISS_INDEX_PATH = BASE_DIR / "faiss_index"
 FLIGHTS_PATH = DATA_DIR / "flights.json"
 KNOWLEDGE_BASE_PATH = DATA_DIR / "visa_rules.md"
 
-# ──────────────────────────────────────────────
-# LLM & Embeddings
-# ──────────────────────────────────────────────
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+# Commented out OpenAI LLM
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
     temperature=0,
     max_tokens=1024,
-    # GROQ_API_KEY is read automatically from .env
 )
 
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2",
-    # all-MiniLM-L6-v2 rationale:
-    #   - Fully local — no API key, no cost, works offline after first download
-    #   - ~90MB model, downloads once and caches via HuggingFace hub
-    #   - 384-dimensional vectors; excellent semantic similarity for policy/visa text
-    #   - Top lightweight model on MTEB benchmarks; fast inference on CPU
     model_kwargs={"device": "cpu"},
-    encode_kwargs={"normalize_embeddings": True},  # cosine similarity requires L2-normalized vectors
+    encode_kwargs={"normalize_embeddings": True},
 )
 
-
-# ──────────────────────────────────────────────
-# Pydantic models for structured LLM output
-# ──────────────────────────────────────────────
 class FlightQuery(BaseModel):
-    """Structured flight search parameters extracted from natural language."""
-
     origin: str = Field(description="Departure city, e.g. 'Dubai'")
     destination: str = Field(description="Arrival city, e.g. 'Tokyo'")
-    month: str | None = Field(
-        default=None, description="Preferred travel month, e.g. 'August'"
-    )
-    alliance: str | None = Field(
-        default=None,
-        description="Preferred airline alliance: 'Star Alliance', 'oneworld', 'SkyTeam', or None",
-    )
-    airline: str | None = Field(
-        default=None, description="Specific airline preference if any"
-    )
-    avoid_overnight_layover: bool = Field(
-        default=False,
-        description="True if user wants to avoid overnight layovers",
-    )
-    refundable_only: bool = Field(
-        default=False, description="True if user wants only refundable tickets"
-    )
-    max_price_usd: float | None = Field(
-        default=None, description="Maximum price in USD if specified"
-    )
-    cabin: str | None = Field(
-        default=None,
-        description="Cabin class preference: 'Economy', 'Business', 'First'",
-    )
+    month: str | None = Field(default=None, description="Preferred travel month, e.g. 'August'")
+    alliance: str | None = Field(default=None, description="Preferred airline alliance: 'Star Alliance', 'oneworld', 'SkyTeam', or None")
+    airline: str | None = Field(default=None, description="Specific airline preference if any")
+    avoid_overnight_layover: bool = Field(default=False, description="True if user wants to avoid overnight layovers")
+    refundable_only: bool = Field(default=False, description="True if user wants only refundable tickets")
+    max_price_usd: float | None = Field(default=None, description="Maximum price in USD if specified")
+    cabin: str | None = Field(default=None, description="Cabin class preference: 'Economy', 'Business', 'First'")
 
 
-# ──────────────────────────────────────────────
-# Vector Store (RAG)
-# ──────────────────────────────────────────────
 def build_or_load_vectorstore() -> FAISS:
-    """
-    Build FAISS index from the knowledge base, or load from disk if already built.
-
-    Chunking parameters:
-      chunk_size=512    — fits one complete visa rule or policy paragraph
-      chunk_overlap=50  — 10% overlap prevents boundary blindness
-      separators        — tries paragraph → sentence → word breaks in order
-    """
     if FAISS_INDEX_PATH.exists():
         return FAISS.load_local(
             str(FAISS_INDEX_PATH),
@@ -149,82 +79,70 @@ def build_or_load_vectorstore() -> FAISS:
     return vectorstore
 
 
-vectorstore = build_or_load_vectorstore()
-retriever = vectorstore.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": 3},  # return top-3 most relevant chunks
-)
+# Lazy load vectorstore
+_vectorstore = None
+
+def get_vectorstore() -> FAISS:
+    global _vectorstore
+    if _vectorstore is None:
+        _vectorstore = build_or_load_vectorstore()
+    return _vectorstore
+
+def get_retriever():
+    return get_vectorstore().as_retriever(search_type="similarity", search_kwargs={"k": 3})
 
 
-# ──────────────────────────────────────────────
-# Tool Definitions
-# ──────────────────────────────────────────────
 @tool
 def search_flights(query: str) -> str:
-    """
-    Search available flights based on a natural language query.
-    Use this tool when the user asks about flight availability, prices,
-    routes, airlines, alliances, layovers, or travel options.
-    The query should describe what the user is looking for.
-    """
+    """Search available flights based on a natural language query."""
     flights: list[dict] = json.loads(FLIGHTS_PATH.read_text(encoding="utf-8"))
 
-    # Use the LLM to extract structured parameters from the free-text query
-    extraction_llm = llm.with_structured_output(FlightQuery)
+    extraction_llm = extraction_llm_base.with_structured_output(FlightQuery)
     params: FlightQuery = extraction_llm.invoke(
         f"Extract flight search parameters from this query: {query}"
     )
 
     results = flights
 
-    # Filter: origin (case-insensitive partial match)
     if params.origin:
         results = [
             f for f in results
             if params.origin.lower() in f["from"].lower()
         ]
 
-    # Filter: destination
     if params.destination:
         results = [
             f for f in results
             if params.destination.lower() in f["to"].lower()
         ]
 
-    # Filter: alliance
     if params.alliance:
         results = [
             f for f in results
             if params.alliance.lower() in f["alliance"].lower()
         ]
 
-    # Filter: specific airline
     if params.airline:
         results = [
             f for f in results
             if params.airline.lower() in f["airline"].lower()
         ]
 
-    # Filter: avoid overnight layovers
     if params.avoid_overnight_layover:
         results = [f for f in results if not f["overnight_layover"]]
 
-    # Filter: refundable only
     if params.refundable_only:
         results = [f for f in results if f["refundable"]]
 
-    # Filter: max price
     if params.max_price_usd:
         results = [f for f in results if f["price_usd"] <= params.max_price_usd]
 
-    # Filter: cabin class
     if params.cabin:
         results = [
             f for f in results
             if f.get("cabin", "").lower() == params.cabin.lower()
         ]
 
-    # Filter: month (match against departure_date)
     if params.month:
         month_map = {
             "january": "01", "february": "02", "march": "03",
@@ -246,10 +164,8 @@ def search_flights(query: str) -> str:
             "or overnight-layover restriction."
         )
 
-    # Sort by price ascending
     results.sort(key=lambda x: x["price_usd"])
 
-    # Format output
     lines = [f"Found {len(results)} flight(s) matching your criteria:\n"]
     for f in results:
         layover_str = (
@@ -274,12 +190,8 @@ def search_flights(query: str) -> str:
 
 @tool
 def answer_travel_policy(question: str) -> str:
-    """
-    Answer questions about visa requirements, refund policies, baggage rules,
-    transit visas, layover policies, or airline alliance benefits.
-    Use this tool when the user asks policy or regulation questions.
-    """
-    docs = retriever.invoke(question)
+    """Answer questions about visa requirements, refund policies, baggage rules, transit visas, layover policies, or airline alliance benefits."""
+    docs = get_retriever().invoke(question)
 
     if not docs:
         return (
@@ -287,10 +199,8 @@ def answer_travel_policy(question: str) -> str:
             "Please check official airline or embassy websites for the most current rules."
         )
 
-    # Combine retrieved chunks into context
     context = "\n\n---\n\n".join(doc.page_content for doc in docs)
 
-    # Use LLM to synthesize a focused answer from retrieved context
     synthesis_prompt = f"""You are a knowledgeable travel policy assistant.
 Using ONLY the following retrieved policy excerpts, answer the user's question clearly and concisely.
 If the context doesn't fully cover the question, say so and recommend checking official sources.
@@ -307,9 +217,6 @@ Provide a helpful, accurate answer based on the context above."""
     return response.content
 
 
-# ──────────────────────────────────────────────
-# LangGraph Agent
-# ──────────────────────────────────────────────
 TOOLS = [search_flights, answer_travel_policy]
 
 llm_with_tools = llm.bind_tools(TOOLS)
@@ -318,9 +225,9 @@ SYSTEM_PROMPT = """You are Aria, a friendly and knowledgeable travel assistant p
 You help users plan international trips by searching for flights and answering travel policy questions.
 
 Your capabilities:
-1. 🔍 Search flights — use the `search_flights` tool for any flight-related queries
-2. 📋 Policy & visa info — use the `answer_travel_policy` tool for visa rules, refund policies, baggage, and layover questions
-3. 💬 General travel advice — answer conversationally when no tool is needed
+1. Search flights — use the `search_flights` tool for any flight-related queries
+2. Policy & visa info — use the `answer_travel_policy` tool for visa rules, refund policies, baggage, and layover questions
+3. General travel advice — answer conversationally when no tool is needed
 
 Guidelines:
 - Always be warm, helpful, and concise
@@ -336,14 +243,12 @@ class AgentState(TypedDict):
 
 
 def agent_node(state: AgentState) -> dict[str, Any]:
-    """Core LLM reasoning node — decides whether to call a tool or respond directly."""
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
     response = llm_with_tools.invoke(messages)
     return {"messages": [response]}
 
 
 def should_continue(state: AgentState) -> str:
-    """Conditional edge: route to tools if tool_calls present, else end."""
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "tools"
@@ -351,7 +256,6 @@ def should_continue(state: AgentState) -> str:
 
 
 def build_graph() -> StateGraph:
-    """Assemble the LangGraph computation graph."""
     tool_node = ToolNode(TOOLS)
 
     graph = StateGraph(AgentState)
@@ -360,31 +264,20 @@ def build_graph() -> StateGraph:
 
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    graph.add_edge("tools", "agent")  # after tool execution, return to agent
+    graph.add_edge("tools", "agent")
 
     return graph.compile()
 
 
-# ──────────────────────────────────────────────
-# Public interface
-# ──────────────────────────────────────────────
 _graph = build_graph()
 
 
 def chat(user_message: str, history: list[dict] | None = None) -> str:
-    """
-    Send a message and get a response. Maintains conversation history.
-
-    Args:
-        user_message: The user's input text.
-        history: List of previous messages as dicts with 'role' and 'content'.
-
-    Returns:
-        The assistant's response as a string.
-    """
     messages = []
     if history:
-        for msg in history:
+        # Limit history to last 10 messages to prevent context bloat and loops
+        recent_history = history[-10:]
+        for msg in recent_history:
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
@@ -396,13 +289,9 @@ def chat(user_message: str, history: list[dict] | None = None) -> str:
     return result["messages"][-1].content
 
 
-# ──────────────────────────────────────────────
-# CLI entry point
-# ──────────────────────────────────────────────
 def main():
-    """Run the assistant interactively in the terminal."""
     print("=" * 60)
-    print("  ✈️  Kavak Travel Assistant (Aria)")
+    print("  Kavak Travel Assistant (Aria)")
     print("  Type 'quit' or 'exit' to stop.")
     print("=" * 60)
 
@@ -412,13 +301,13 @@ def main():
         try:
             user_input = input("\nYou: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye! Safe travels. ✈️")
+            print("\nGoodbye! Safe travels.")
             break
 
         if not user_input:
             continue
         if user_input.lower() in {"quit", "exit", "bye"}:
-            print("Aria: Goodbye! Safe travels. ✈️")
+            print("Aria: Goodbye! Safe travels.")
             break
 
         response = chat(user_input, history)

@@ -1,6 +1,102 @@
 # ✈️ Kavak Conversational Travel Assistant
 
-A production-quality conversational travel assistant built with **LangGraph**, **Claude (Anthropic)**, **FAISS**, and **Streamlit**. The assistant — named **Aria** — helps users plan international trips by searching flights and answering visa/policy questions through natural language.
+A conversational AI travel assistant named **Aria** that helps users search flights and answer travel policy questions using natural language.
+
+## Features
+
+- **Flight Search**: Find flights by route, airline alliance, price, cabin class, and more
+- **Travel Policies**: Answer questions about visas, refunds, baggage, and layover rules
+- **Conversational Interface**: Chat naturally with the assistant
+- **Web UI**: Streamlit-based chat interface with conversation history
+- **CLI Mode**: Terminal-based interaction
+- **Conversation Management**: Save, switch between, and continue previous conversations
+
+## Quick Start
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/ilyassuhaima/Conversational_Travel_Assistant.git
+   cd Conversational_Travel_Assistant
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Set up environment variables**:
+   Create a `.env` file in the project root:
+   ```
+   OPENAI_API_KEY=your_openai_api_key_here
+   ```
+
+4. **Run the assistant**:
+   - **Web UI**: `streamlit run streamlit_app.py` or `python -m streamlit run streamlit_app.py`
+   - **CLI**: `python main.py`
+
+## Technical Details
+
+### Architecture
+
+- **LLM**: OpenAI GPT-4o-mini for reasoning and response generation
+- **Agent Framework**: LangGraph for stateful conversation management
+- **Vector Store**: FAISS for semantic search over travel policy documents
+- **Embeddings**: HuggingFace `all-MiniLM-L6-v2` (local, no API required)
+- **Frontend**: Streamlit for web interface
+
+### Data Sources
+
+- **Flights**: Mock JSON data with 12 sample flights across 4 airlines and 3 alliances
+- **Policies**: Markdown knowledge base covering visa rules, refund policies, baggage allowances, and airline alliance benefits
+
+### Key Components
+
+1. **Flight Search Tool**: Parses natural language queries into structured parameters using GPT-4's structured output, then filters JSON flight data
+2. **RAG Tool**: Retrieves relevant policy chunks from FAISS vector store, synthesizes answers using GPT-4
+3. **Agent Logic**: LangGraph state machine that routes between tool calls and direct responses
+
+### Setup Requirements
+
+- **Python**: 3.8+
+- **API Key**: OpenAI API key (for GPT-4 calls)
+- **Dependencies**: Listed in `requirements.txt`
+- **Embeddings**: Downloads ~90MB model on first run (cached locally)
+
+### File Structure
+
+```
+.
+├── main.py              # Core agent and CLI
+├── streamlit_app.py     # Web UI
+├── requirements.txt     # Python dependencies
+├── README.md            # This file
+├── data/
+│   ├── flights.json     # Flight data
+│   └── visa_rules.md    # Policy knowledge base
+└── faiss_index/         # Auto-generated vector store (created on first run)
+```
+
+## Usage Examples
+
+**Flight Search**:
+- "Find round-trip flights from Dubai to Tokyo in August with Star Alliance airlines"
+- "Show me the cheapest flights to Paris under $500"
+
+**Policy Questions**:
+- "Do UAE citizens need a visa for Japan?"
+- "What's the refund policy for non-refundable tickets?"
+
+**Web UI Features**:
+- **Conversation History**: Access previous chats from the collapsible sidebar
+- **New Chat**: Start fresh conversations with the "New Chat" button
+- **Continue Conversations**: Click on any previous chat to resume where you left off
+- **Auto-generated Titles**: Conversations are automatically titled based on your first message
+
+## Development
+
+The assistant uses structured LLM output for robust query parsing and two-stage RAG (retrieve + synthesize) to prevent hallucination in policy answers. All components are designed for easy extension with real APIs or additional data sources.
+
+A production-quality conversational travel assistant built with **LangGraph**, **Claude (Anthropic)**, **FAISS**, and **Streamlit**. The assistant, named **Aria**, helps users plan international trips by searching flights and answering visa/policy questions through natural language.
 
 ---
 
@@ -24,8 +120,8 @@ kavak_travel_assistant/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/kavak-travel-assistant.git
-cd kavak-travel-assistant
+git clone https://github.com/YOUR_USERNAME/Conversational_Travel_Assistant.git
+cd Conversational_Travel_Assistant
 ```
 
 ### 2. Create a virtual environment
@@ -47,7 +143,7 @@ pip install -r requirements.txt
 Create a `.env` file in the project root:
 
 ```env
-GROQ_API_KEY=gsk_...
+OPENAI_API_KEY=sk-...
 ```
 
 > **Note:** Only one API key needed — get it free (no credit card) at **console.groq.com**.
