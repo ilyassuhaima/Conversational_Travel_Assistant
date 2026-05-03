@@ -11,29 +11,6 @@ A conversational AI travel assistant named **Aria** that helps users search flig
 - **CLI Mode**: Terminal-based interaction
 - **Conversation Management**: Save, switch between, and continue previous conversations
 
-## Quick Start
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/ilyassuhaima/Conversational_Travel_Assistant.git
-   cd Conversational_Travel_Assistant
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Set up environment variables**:
-   Create a `.env` file in the project root:
-   ```
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
-
-4. **Run the assistant**:
-   - **Web UI**: `streamlit run streamlit_app.py` or `python -m streamlit run streamlit_app.py`
-   - **CLI**: `python main.py`
-
 ## Technical Details
 
 ### Architecture
@@ -52,13 +29,13 @@ A conversational AI travel assistant named **Aria** that helps users search flig
 ### Key Components
 
 1. **Flight Search Tool**: Parses natural language queries into structured parameters using GPT-4's structured output, then filters JSON flight data
-2. **RAG Tool**: Retrieves relevant policy chunks from FAISS vector store, synthesizes answers using GPT-4
+2. **RAG Tool**: Retrieves relevant policy chunks from FAISS vector store, synthesizes answers using GPT-4o-mini
 3. **Agent Logic**: LangGraph state machine that routes between tool calls and direct responses
 
 ### Setup Requirements
 
 - **Python**: 3.8+
-- **API Key**: OpenAI API key (for GPT-4 calls)
+- **API Key**: OpenAI API key
 - **Dependencies**: Listed in `requirements.txt`
 - **Embeddings**: Downloads ~90MB model on first run (cached locally)
 
@@ -96,26 +73,11 @@ A conversational AI travel assistant named **Aria** that helps users search flig
 
 The assistant uses structured LLM output for robust query parsing and two-stage RAG (retrieve + synthesize) to prevent hallucination in policy answers. All components are designed for easy extension with real APIs or additional data sources.
 
-A production-quality conversational travel assistant built with **LangGraph**, **Claude (Anthropic)**, **FAISS**, and **Streamlit**. The assistant, named **Aria**, helps users plan international trips by searching flights and answering visa/policy questions through natural language.
+A production-quality conversational travel assistant built with **LangGraph**, **OpenAI**, **FAISS**, and **Streamlit**. The assistant, named **Aria**, helps users plan international trips by searching flights and answering visa/policy questions through natural language.
 
 ---
 
-## 🗂️ Repository Structure
-
-```
-kavak_travel_assistant/
-├── main.py              # Core agent logic (LangGraph + tools + CLI)
-├── streamlit_app.py     # Streamlit chat UI
-├── requirements.txt     # Python dependencies
-├── README.md            # This file
-└── data/
-    ├── flights.json     # Mock flight listings (12 flights, 4 airlines, 3 alliances)
-    └── visa_rules.md    # Knowledge base: visa rules, refund, baggage, layover policies
-```
-
----
-
-## ⚙️ Setup Instructions
+## Setup Instructions
 
 ### 1. Clone the repository
 
@@ -146,9 +108,6 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=sk-...
 ```
 
-> **Note:** Only one API key needed — get it free (no credit card) at **console.groq.com**.
-> Embeddings run fully locally via HuggingFace (`all-MiniLM-L6-v2`). The model downloads once (~90MB) and caches locally. No OpenAI or Anthropic key required.
-
 ### 5. Run the CLI
 
 ```bash
@@ -163,7 +122,7 @@ streamlit run streamlit_app.py
 
 ---
 
-## 🏗️ System Overview
+## System Overview
 
 ```
 User Input
@@ -174,18 +133,18 @@ User Input
 │                                         │
 │  ┌──────────┐    ┌──────────────────┐   │
 │  │  Agent   │───▶│   Tool Router    │   │
-│  │  Node    │    │ (Claude decides) │   │
+│  │  Node    │    │ (Agent decides)  │   │
 │  └──────────┘    └──────────────────┘   │
 │        ▲                │               │
 │        │       ┌────────┴────────┐      │
 │        │       ▼                 ▼      │
-│        │  ┌─────────┐   ┌─────────────┐│
-│        │  │ Flight  │   │  RAG Tool   ││
-│        │  │ Search  │   │  (FAISS +   ││
-│        │  │  Tool   │   │   Claude)   ││
-│        │  └────┬────┘   └──────┬──────┘│
-│        │       └───────┬───────┘       │
-│        └───────────────┘               │
+│        │  ┌─────────┐   ┌─────────────┐ │
+│        │  │ Flight  │   │  RAG Tool   │ │
+│        │  │ Search  │   │  (FAISS+    | │
+│        │  │  Tool   │   │   LLM)      │ │
+│        │  └────┬────┘   └──────┬──────┘ │
+│        │       └───────┬───────┘        │
+│        └───────────────┘                │
 └─────────────────────────────────────────┘
     │
     ▼
@@ -196,7 +155,7 @@ Assistant Response
 
 1. **User sends a message** → enters the LangGraph `agent` node
 2. **Agent node** calls Claude with the conversation history + system prompt + tool definitions
-3. **Claude decides** whether to call a tool or respond directly
+3. **LLM decides** whether to call a tool or respond directly
 4. **If tool needed** → routes to `ToolNode` which executes the appropriate tool
 5. **Tool output** is appended to the message history and returned to the agent
 6. **Agent responds** with a final synthesized answer
@@ -204,7 +163,7 @@ Assistant Response
 
 ---
 
-## 🧠 Prompt Strategies
+## Prompt Strategies
 
 ### System Prompt (Aria persona)
 The system prompt establishes Aria as a friendly, knowledgeable travel assistant with clear behavioral guidelines:
@@ -213,16 +172,16 @@ The system prompt establishes Aria as a friendly, knowledgeable travel assistant
 - Proactively surface relevant information (e.g., mention transit visa policy when overnight layover is found)
 
 ### Structured Output Extraction
-Flight query parsing uses `llm.with_structured_output(FlightQuery)` — a Pydantic model that forces Claude to extract normalized fields (origin, destination, alliance, overnight preference, etc.) from free-text queries. This is more robust than regex or keyword matching because it handles paraphrasing ("I want to avoid sleeping at the airport" → `avoid_overnight_layover: true`).
+Flight query parsing uses `llm.with_structured_output(FlightQuery)` — a Pydantic model that forces OpenaAI to extract normalized fields (origin, destination, alliance, overnight preference, etc.) from free-text queries. This is more robust than regex or keyword matching because it handles paraphrasing ("I want to avoid sleeping at the airport" → `avoid_overnight_layover: true`).
 
 ### RAG Synthesis Prompt
 The RAG tool uses a two-step approach:
 1. **Retrieve** top-3 chunks from FAISS (similarity search)
-2. **Synthesize** — a separate Claude call with a strict instruction to answer only from retrieved context, preventing hallucination
+2. **Synthesize** — a separate llm call with a strict instruction to answer only from retrieved context, preventing hallucination
 
 ---
 
-## 🔍 RAG & Retrieval Details
+## RAG & Retrieval Details
 
 ### Embedding Model: `text-embedding-3-small`
 - Chosen over `text-embedding-3-large`: our KB has ~20 chunks — larger model adds cost with no measurable retrieval gain at this scale
@@ -245,7 +204,7 @@ The RAG tool uses a two-step approach:
 
 ---
 
-## 🤖 Agent Logic (LangGraph)
+## Agent Logic (LangGraph)
 
 ### Why LangGraph over LangChain AgentExecutor?
 - **Explicit state graph**: every node and edge is visible and debuggable
@@ -256,20 +215,20 @@ The RAG tool uses a two-step approach:
 ### Graph Nodes
 | Node | Role |
 |------|------|
-| `agent` | Calls Claude with full message history; decides whether to use tools |
-| `tools` | LangGraph `ToolNode` — executes whichever tool Claude selected |
+| `agent` | Calls OpenAI with full message history; decides whether to use tools |
+| `tools` | LangGraph `ToolNode` — executes whichever tool the llm selected |
 
 ### Edges
 | Edge | Condition |
 |------|-----------|
 | `START → agent` | Always |
-| `agent → tools` | If Claude's response contains `tool_calls` |
-| `agent → END` | If Claude responded directly (no tool calls) |
+| `agent → tools` | If llm's response contains `tool_calls` |
+| `agent → END` | If llm responded directly (no tool calls) |
 | `tools → agent` | Always (return tool output to agent for synthesis) |
 
 ---
 
-## 💡 Sample Outputs
+## Sample Outputs
 
 ### Flight Search
 **Input:** `Find me a round-trip to Tokyo in August with Star Alliance airlines only. I want to avoid overnight layovers.`
@@ -307,33 +266,3 @@ Found 2 flight(s) matching your criteria:
 > Canceling a refundable ticket between 24 and 48 hours before departure incurs a 15% fee (deducted from your refund). Since 30 hours falls in this window, you'd receive 85% of the ticket price back, processed within 7–14 business days.
 
 ---
-
-## 🎁 Bonus Features
-
-- **Structured LLM output parsing** with Pydantic for robust query normalization
-- **Two-stage RAG**: retrieve → synthesize (prevents hallucination in policy answers)
-- **Streamlit UI** with suggested prompts, sidebar info panel, and conversation reset
-- **FAISS index persistence** (skips re-embedding on subsequent runs)
-- **Graceful no-results handling** with actionable suggestions to relax filters
-
----
-
-## 🛠️ Tech Stack
-
-| Component | Technology |
-|-----------|-----------|
-| LLM | Groq (`llama-3.3-70b-versatile`) — free, no billing |
-| Agent Framework | LangGraph 0.2+ |
-| Embeddings | HuggingFace `all-MiniLM-L6-v2` — fully local, free |
-| Vector Store | FAISS (faiss-cpu) |
-| Structured Output | Pydantic v2 |
-| Frontend | Streamlit |
-| Data | JSON (flights) + Markdown (policies) |
-
----
-
-## 📝 Notes
-
-- The FAISS index is built automatically on first run and cached to `faiss_index/`
-- All LLM calls use `temperature=0` for deterministic, factual responses
-- The agent is stateless between sessions; conversation history is managed client-side
